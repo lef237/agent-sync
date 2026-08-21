@@ -13,6 +13,8 @@ agent-sync --check    # detect differences; exit 1 if any (for CI)
 agent-sync --dry-run  # show what would change without applying
 ```
 
+For a guided, self-contained example, see the [demo guide](demo/README.md). A [Japanese version](demo/README.ja.md) is also available.
+
 ## How it works
 
 | Item | Codex side | Claude side | Strategy |

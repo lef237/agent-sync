@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "managedSymlinks": [
+    {
+      "name": "release",
+      "target": "../../.agents/skills/release"
+    },
+    {
+      "name": "review",
+      "target": "../../.agents/skills/review"
+    }
+  ]
+}

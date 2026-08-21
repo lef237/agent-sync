@@ -26,6 +26,8 @@ agent-sync --dry-run    # 変更内容だけ表示
 agent-sync --verbose    # 詳細出力
 ```
 
+同期後の状態を確認できるデモは、[日本語ガイド](../demo/README.ja.md) を参照してください。英語版は [demo/README.md](../demo/README.md) です。
+
 ## ビルド・テスト
 
 ```bash
