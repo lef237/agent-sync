@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/lef237/agent-sync/internal/apply"
 	"github.com/lef237/agent-sync/internal/discovery"
@@ -16,6 +17,15 @@ func main() {
 }
 
 func run(args []string) int {
+	targetName := "all"
+	for i, a := range args {
+		if !strings.HasPrefix(a, "-") {
+			targetName = a
+			args = append(append([]string{}, args[:i]...), args[i+1:]...)
+			break
+		}
+	}
+
 	fs := flag.NewFlagSet("agent-sync", flag.ContinueOnError)
 	check := fs.Bool("check", false, "check for differences without applying; exit 1 if any")
 	dry := fs.Bool("dry-run", false, "show what would be done without applying")
@@ -26,10 +36,6 @@ func run(args []string) int {
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
-	}
-	targetName := "all"
-	if rest := fs.Args(); len(rest) > 0 {
-		targetName = rest[0]
 	}
 
 	cwd, err := os.Getwd()
