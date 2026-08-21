@@ -39,12 +39,6 @@ go test ./...
 go install github.com/lef237/agent-sync@latest
 ```
 
-実行形式をパスに置く例:
-
-```bash
-go build -o /usr/local/bin/agent-sync .
-```
-
 ## 構成
 
 ```text
