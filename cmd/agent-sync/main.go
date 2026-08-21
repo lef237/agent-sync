@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"os"
 
-	"agent-sync/internal/apply"
-	"agent-sync/internal/discovery"
-	"agent-sync/internal/target"
-	"agent-sync/internal/target/claude"
+	"github.com/lef237/agent-sync/internal/apply"
+	"github.com/lef237/agent-sync/internal/discovery"
+	"github.com/lef237/agent-sync/internal/target"
+	"github.com/lef237/agent-sync/internal/target/claude"
 )
 
 func main() {

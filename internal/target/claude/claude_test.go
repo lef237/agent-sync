@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"agent-sync/internal/apply"
-	"agent-sync/internal/discovery"
+	"github.com/lef237/agent-sync/internal/apply"
+	"github.com/lef237/agent-sync/internal/discovery"
 )
 
 func TestSyncE2E(t *testing.T) {

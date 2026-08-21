@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 
-	"agent-sync/internal/model"
-	"agent-sync/internal/planner"
+	"github.com/lef237/agent-sync/internal/model"
+	"github.com/lef237/agent-sync/internal/planner"
 )
 
 const stateFileName = ".agent-sync.json"

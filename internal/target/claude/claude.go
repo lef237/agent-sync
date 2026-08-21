@@ -7,10 +7,10 @@ import (
 	"sort"
 	"strings"
 
-	"agent-sync/internal/apply"
-	"agent-sync/internal/model"
-	"agent-sync/internal/planner"
-	"agent-sync/internal/target"
+	"github.com/lef237/agent-sync/internal/apply"
+	"github.com/lef237/agent-sync/internal/model"
+	"github.com/lef237/agent-sync/internal/planner"
+	"github.com/lef237/agent-sync/internal/target"
 )
 
 type Claude struct{}

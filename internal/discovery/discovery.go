@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"agent-sync/internal/model"
+	"github.com/lef237/agent-sync/internal/model"
 )
 
 var skipped = map[string]bool{
