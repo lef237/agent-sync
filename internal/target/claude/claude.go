@@ -44,6 +44,9 @@ func (t *Claude) planInstructions(root string, src *model.SourceState, p *planne
 		}
 		block := planner.StartMarker + "\n@" + importTarget + "\n" + planner.EndMarker
 		relPath := filepath.ToSlash(filepath.Join(dir, "CLAUDE.md"))
+		if err := apply.ValidateOutputPath(root, relPath); err != nil {
+			return err
+		}
 		existing, err := os.ReadFile(filepath.Join(root, relPath))
 		if os.IsNotExist(err) {
 			p.Add(planner.Create{Path: relPath, Content: block + "\n"})
@@ -61,10 +64,20 @@ func (t *Claude) planInstructions(root string, src *model.SourceState, p *planne
 }
 
 func (t *Claude) planSkills(root string, src *model.SourceState, p *planner.Plan) error {
-	st := apply.LoadState(root)
+	st, err := apply.LoadState(root)
+	if err != nil {
+		return err
+	}
+	managed := make(map[string]model.ManagedSymlink, len(st.ManagedSymlinks))
+	for _, link := range st.ManagedSymlinks {
+		managed[link.Name] = link
+	}
 	desired := map[string]bool{}
 	for _, sk := range src.Skills {
 		desired[sk.Name] = true
+		if err := apply.ValidateLinkPath(root, sk.Dst); err != nil {
+			return err
+		}
 		dst := filepath.Join(root, sk.Dst)
 		srcAbs := filepath.Join(root, sk.Src)
 		rel, err := filepath.Rel(filepath.Dir(dst), srcAbs)
@@ -80,7 +93,7 @@ func (t *Claude) planSkills(root string, src *model.SourceState, p *planner.Plan
 			return err
 		}
 		if fi.Mode()&os.ModeSymlink == 0 {
-			if contains(st.ManagedSymlinks, sk.Name) {
+			if _, ok := managed[sk.Name]; ok {
 				return fmt.Errorf("%s is managed by agent-sync but is no longer a symlink; remove it manually", dst)
 			}
 			continue
@@ -89,20 +102,63 @@ func (t *Claude) planSkills(root string, src *model.SourceState, p *planner.Plan
 		if err != nil {
 			return err
 		}
+
+		link, isManaged := managed[sk.Name]
+		if !isManaged {
+			// A symlink that is not recorded as ours belongs to the user,
+			// even when it has the same skill name.
+			continue
+		}
+		if link.Target == "" {
+			// Legacy state recorded only names. Re-adopt an existing link only
+			// when its target exactly matches the deterministic target we would
+			// create; otherwise preserve it as a user-owned link.
+			if cur == rel {
+				p.Add(planner.AdoptLink{Path: sk.Dst, Target: rel})
+			} else {
+				p.Add(planner.ForgetLink{Path: sk.Dst})
+			}
+			continue
+		}
+		if cur != link.Target {
+			return fmt.Errorf("%s was changed outside agent-sync; remove it manually", dst)
+		}
 		if cur != rel {
-			p.Add(planner.RemoveLink{Path: sk.Dst})
+			p.Add(planner.RemoveLink{Path: sk.Dst, Target: cur})
 			p.Add(planner.CreateLink{Path: sk.Dst, Target: rel})
 		}
 	}
 
-	for _, name := range st.ManagedSymlinks {
-		if desired[name] {
+	for _, link := range st.ManagedSymlinks {
+		if desired[link.Name] {
 			continue
 		}
-		relPath := filepath.ToSlash(filepath.Join(".claude", "skills", name))
+		relPath := filepath.ToSlash(filepath.Join(".claude", "skills", link.Name))
+		if err := apply.ValidateLinkPath(root, relPath); err != nil {
+			return err
+		}
 		dst := filepath.Join(root, relPath)
-		if fi, err := os.Lstat(dst); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-			p.Add(planner.RemoveLink{Path: relPath})
+		fi, err := os.Lstat(dst)
+		if os.IsNotExist(err) {
+			p.Add(planner.ForgetLink{Path: relPath})
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if fi.Mode()&os.ModeSymlink == 0 {
+			p.Add(planner.ForgetLink{Path: relPath})
+			continue
+		}
+		cur, err := os.Readlink(dst)
+		if err != nil {
+			return err
+		}
+		if link.Target != "" && cur == link.Target {
+			p.Add(planner.RemoveLink{Path: relPath, Target: cur})
+		} else {
+			// The link was replaced or came from legacy state. Preserve it.
+			p.Add(planner.ForgetLink{Path: relPath})
 		}
 	}
 	return nil
@@ -115,15 +171,6 @@ func sortedKeys(m map[string][]model.Instruction) []string {
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
 
 var _ target.Target = (*Claude)(nil)

@@ -32,7 +32,7 @@ func RepoRoot(start string) (string, error) {
 	}
 	for {
 		fi, err := os.Stat(filepath.Join(dir, ".git"))
-		if err == nil && fi.IsDir() {
+		if err == nil && (fi.IsDir() || fi.Mode().IsRegular()) {
 			return dir, nil
 		}
 		parent := filepath.Dir(dir)

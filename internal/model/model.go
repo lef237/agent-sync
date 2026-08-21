@@ -1,7 +1,7 @@
 package model
 
 type SourceState struct {
-	Root          string
+	Root         string
 	Instructions []Instruction
 	Skills       []Skill
 }
@@ -18,6 +18,13 @@ type Skill struct {
 }
 
 type State struct {
-	Version         int      `json:"version"`
-	ManagedSymlinks []string `json:"managedSymlinks"`
+	Version         int              `json:"version"`
+	ManagedSymlinks []ManagedSymlink `json:"managedSymlinks"`
+}
+
+// ManagedSymlink records the exact link target that agent-sync created.
+// Target is empty only for legacy entries that have not been backfilled yet.
+type ManagedSymlink struct {
+	Name   string `json:"name"`
+	Target string `json:"target"`
 }

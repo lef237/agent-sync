@@ -18,13 +18,17 @@ func main() {
 
 func run(args []string) int {
 	targetName := "all"
-	for i, a := range args {
-		if !strings.HasPrefix(a, "-") {
+	targetSet := false
+	filteredArgs := make([]string, 0, len(args))
+	for _, a := range args {
+		if !targetSet && !strings.HasPrefix(a, "-") {
 			targetName = a
-			args = append(append([]string{}, args[:i]...), args[i+1:]...)
-			break
+			targetSet = true
+			continue
 		}
+		filteredArgs = append(filteredArgs, a)
 	}
+	args = filteredArgs
 
 	fs := flag.NewFlagSet("agent-sync", flag.ContinueOnError)
 	check := fs.Bool("check", false, "check for differences without applying; exit 1 if any")
@@ -35,6 +39,13 @@ func run(args []string) int {
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return 0
+		}
+		return 2
+	}
+	if rest := fs.Args(); len(rest) > 0 {
+		fmt.Fprintln(os.Stderr, "agent-sync: unexpected argument:", strings.Join(rest, " "))
 		return 2
 	}
 
@@ -85,7 +96,11 @@ func run(args []string) int {
 			}
 			continue
 		}
-		st := apply.LoadState(root)
+		st, err := apply.LoadState(root)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "agent-sync:", err)
+			return 1
+		}
 		if err := apply.Apply(root, plan, st); err != nil {
 			fmt.Fprintln(os.Stderr, "agent-sync:", err)
 			return 1

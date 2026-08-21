@@ -55,3 +55,15 @@ func TestApplyCreatesFiles(t *testing.T) {
 		t.Fatalf("CLAUDE.md should exist: %v", err)
 	}
 }
+
+func TestHelpReturnsSuccess(t *testing.T) {
+	if code := run([]string{"--help"}); code != 0 {
+		t.Fatalf("expected --help to return 0, got %d", code)
+	}
+}
+
+func TestRejectsExtraPositionalArguments(t *testing.T) {
+	if code := run([]string{"claude", "unexpected"}); code != 2 {
+		t.Fatalf("expected extra positional argument to return 2, got %d", code)
+	}
+}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/lef237/agent-sync/internal/apply"
 	"github.com/lef237/agent-sync/internal/discovery"
+	"github.com/lef237/agent-sync/internal/planner"
 )
 
 func TestSyncE2E(t *testing.T) {
@@ -29,7 +30,10 @@ func TestSyncE2E(t *testing.T) {
 		t.Fatal("expected plan actions")
 	}
 
-	st := apply.LoadState(root)
+	st, err := apply.LoadState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := apply.Apply(root, plan, st); err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +79,10 @@ func TestSyncOverridePriority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := apply.LoadState(root)
+	st, err := apply.LoadState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := apply.Apply(root, plan, st); err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +108,10 @@ func TestSyncStaleLinkRemoved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := apply.LoadState(root)
+	st, err := apply.LoadState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := apply.Apply(root, plan, st); err != nil {
 		t.Fatal(err)
 	}
@@ -142,12 +152,286 @@ func TestSyncPreservesUserSkill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := apply.LoadState(root)
+	st, err := apply.LoadState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := apply.Apply(root, plan, st); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".claude", "skills", "claude-only", "SKILL.md")); err != nil {
 		t.Fatalf("user skill lost: %v", err)
+	}
+}
+
+func TestSyncPreservesUserSymlink(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "AGENTS.md", "# Root\n")
+	write(t, root, ".agents/skills/review/SKILL.md", "---\nname: review\n---\n")
+	userTarget := filepath.Join(root, "user-review")
+	if err := os.MkdirAll(userTarget, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(root, ".claude", "skills", "review")
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(userTarget, dst); err != nil {
+		t.Fatal(err)
+	}
+
+	src, err := discovery.Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := New().Plan(root, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range plan.Actions {
+		switch a := action.(type) {
+		case planner.RemoveLink:
+			if a.Path == ".claude/skills/review" {
+				t.Fatalf("user symlink should not be removed: %v", action)
+			}
+		case planner.CreateLink:
+			if a.Path == ".claude/skills/review" {
+				t.Fatalf("user symlink should not be replaced: %v", action)
+			}
+		}
+	}
+
+	st, err := apply.LoadState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := apply.Apply(root, plan, st); err != nil {
+		t.Fatal(err)
+	}
+	cur, err := os.Readlink(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur != userTarget {
+		t.Fatalf("user symlink target changed to %q", cur)
+	}
+}
+
+func TestSyncBackfillsLegacyManagedSymlinkTarget(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "AGENTS.md", "# Root\n")
+	write(t, root, ".agents/skills/review/SKILL.md", "---\nname: review\n---\n")
+	dst := filepath.Join(root, ".claude", "skills", "review")
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	srcDir := filepath.Join(root, ".agents", "skills", "review")
+	target, err := filepath.Rel(filepath.Dir(dst), srcDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, dst); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(apply.StatePath(root), []byte(`{"version":1,"managedSymlinks":["review"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	src, err := discovery.Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := New().Plan(root, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundAdopt := false
+	for _, action := range plan.Actions {
+		switch a := action.(type) {
+		case planner.AdoptLink:
+			if a.Path == ".claude/skills/review" && a.Target == target {
+				foundAdopt = true
+			}
+		case planner.CreateLink:
+			if a.Path == ".claude/skills/review" {
+				t.Fatalf("matching legacy link should be adopted, not recreated: %v", action)
+			}
+		}
+	}
+	if !foundAdopt {
+		t.Fatalf("expected an adopt action, got %v", plan.Actions)
+	}
+
+	st, err := apply.LoadState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := apply.Apply(root, plan, st); err != nil {
+		t.Fatal(err)
+	}
+	cur, err := os.Readlink(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur != target {
+		t.Fatalf("link target changed during adoption: %q", cur)
+	}
+	loaded, err := apply.LoadState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.ManagedSymlinks) != 1 || loaded.ManagedSymlinks[0].Name != "review" || loaded.ManagedSymlinks[0].Target != target {
+		t.Fatalf("legacy target was not backfilled: %#v", loaded.ManagedSymlinks)
+	}
+}
+
+func TestSyncDoesNotRemoveReplacedManagedSymlink(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "AGENTS.md", "# Root\n")
+	write(t, root, ".agents/skills/review/SKILL.md", "---\nname: review\n---\n")
+
+	src, err := discovery.Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := New().Plan(root, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := apply.LoadState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := apply.Apply(root, plan, st); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := filepath.Join(root, ".claude", "skills", "review")
+	userTarget := filepath.Join(root, "user-review")
+	if err := os.MkdirAll(userTarget, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(dst); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(userTarget, dst); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(root, ".agents", "skills", "review")); err != nil {
+		t.Fatal(err)
+	}
+
+	src2, err := discovery.Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan2, err := New().Plan(root, src2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range plan2.Actions {
+		if a, ok := action.(planner.RemoveLink); ok && a.Path == ".claude/skills/review" {
+			t.Fatalf("replaced user symlink should not be removed: %v", action)
+		}
+	}
+	st2, err := apply.LoadState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := apply.Apply(root, plan2, st2); err != nil {
+		t.Fatal(err)
+	}
+	cur, err := os.Readlink(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur != userTarget {
+		t.Fatalf("user symlink target changed to %q", cur)
+	}
+	st3, err := apply.LoadState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st3.ManagedSymlinks) != 0 {
+		t.Fatalf("replaced link should be forgotten: %#v", st3.ManagedSymlinks)
+	}
+}
+
+func TestSyncForgetsMissingManagedSymlink(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "AGENTS.md", "# Root\n")
+	write(t, root, ".agents/skills/review/SKILL.md", "---\nname: review\n---\n")
+
+	src, err := discovery.Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := New().Plan(root, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := apply.LoadState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := apply.Apply(root, plan, st); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, ".claude", "skills", "review")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(root, ".agents", "skills", "review")); err != nil {
+		t.Fatal(err)
+	}
+
+	src2, err := discovery.Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan2, err := New().Plan(root, src2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st2, err := apply.LoadState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := apply.Apply(root, plan2, st2); err != nil {
+		t.Fatal(err)
+	}
+	st3, err := apply.LoadState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st3.ManagedSymlinks) != 0 {
+		t.Fatalf("missing link should be forgotten: %#v", st3.ManagedSymlinks)
+	}
+}
+
+func TestSyncRejectsClaudeSymlink(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "AGENTS.md", "# Root\n")
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "CLAUDE.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	src, err := discovery.Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New().Plan(root, src); err == nil {
+		t.Fatal("Plan should reject a symlinked CLAUDE.md")
+	}
+	got, err := os.ReadFile(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "original" {
+		t.Fatalf("outside file was modified: %q", got)
 	}
 }
 
