@@ -1,0 +1,6 @@
+# binary
+/agent-sync
+
+# test artifacts
+*.test
+coverage.*
