@@ -33,21 +33,27 @@ go build ./...
 go test ./...
 ```
 
+## インストール
+
+```bash
+go install github.com/lef237/agent-sync@latest
+```
+
 実行形式をパスに置く例:
 
 ```bash
-go build -o /usr/local/bin/agent-sync ./cmd/agent-sync
+go build -o /usr/local/bin/agent-sync .
 ```
 
 ## 構成
 
 ```text
-cmd/agent-sync/          CLI エントリポイント
-internal/discovery/      repo root 検出・AGENTS.md / skills の探索
-internal/planner/        アクション型と管理ブロックの編集
-internal/target/         Target インターフェース
-internal/target/claude/  Claude adapter（desired state の計画）
-internal/apply/          計画の適用と状態ファイルの管理
+main.go                CLI エントリポイント
+internal/discovery/    repo root 検出・AGENTS.md / skills の探索
+internal/planner/      アクション型と管理ブロックの編集
+internal/target/       Target インターフェース
+internal/target/claude/ Claude adapter（desired state の計画）
+internal/apply/        計画の適用と状態ファイルの管理
 ```
 
 将来 Cursor 等を足す場合は `internal/target/` に `Target` を実装し、`main.go` の `switch` に追加するだけです。
