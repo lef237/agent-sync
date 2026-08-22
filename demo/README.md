@@ -23,6 +23,8 @@ demo/
         └── review  -> ../../.agents/skills/review
 ```
 
+`.agent-sync.json` records what agent-sync owns, per target: the symlinks it created and the files whose managed block it maintains. That record is what lets it clean up after itself — remove a skill or an `AGENTS.md` and the next sync withdraws exactly what it had added, leaving anything you wrote alone.
+
 `AGENTS.md` is the source of truth. The managed block in `CLAUDE.md` imports the `AGENTS.md` in the same directory:
 
 ```markdown

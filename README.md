@@ -26,7 +26,21 @@ For a guided, self-contained example, see the [demo guide](demo/README.md). A [J
 - If `AGENTS.override.md` exists, it is imported instead (matches Codex precedence).
 - Nested `services/billing/AGENTS.md` gets a `CLAUDE.md` in the same directory.
 - Only the `<!-- agent-sync:start -->` / `<!-- agent-sync:end -->` block is managed in `CLAUDE.md`; hand-written Claude-specific content is preserved.
-- Only symlinks it created are tracked in `.claude/.agent-sync.json`; stale links to removed skills are cleaned up, user-created `.claude/skills/` entries are untouched.
+- Delete an `AGENTS.md` and its block is withdrawn on the next sync: a `CLAUDE.md` that held nothing else is removed, one with hand-written content keeps it.
+- Only what agent-sync created is tracked in `.claude/.agent-sync.json`, recorded per target. Stale links to removed skills are cleaned up; user-created `.claude/skills/` entries are never touched.
+- If `.claude/skills/<name>` already exists and agent-sync did not create it, the skill is left alone and a warning is printed on stderr. Nothing is overwritten, and the exit code is unchanged.
+
+### What gets scanned
+
+`AGENTS.md` is looked for throughout the repository, except in:
+
+- dot directories (`.git`, `.venv`, `.next`, ...) and `node_modules`, at any depth
+- `build/`, `dist/`, `out/`, `target/`, `vendor/` **at the repository root only** — a nested `internal/target/AGENTS.md` is an ordinary source directory and is picked up
+- anything `.gitignore` excludes; a force-added file still counts, and if git is unavailable nothing is excluded
+
+Skills are only read from `.agents/skills/` at the repository root, because Claude Code loads `.claude/skills` from the project root and nowhere else. A nested `.agents/skills` is reported as not synced rather than silently ignored.
+
+The state file is at version 2. A version 1 file written by an earlier build is migrated in place on the next sync.
 
 ## Build & test
 

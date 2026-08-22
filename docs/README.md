@@ -13,7 +13,21 @@ Codex 向けに配置した `AGENTS.md` や `.agents/skills/*` を、ワンコ�
 - `AGENTS.override.md` が存在する場合は、それを import します（Codex の優先順位と一致）。
 - ネストした `services/billing/AGENTS.md` にも、同じディレクトリに `CLAUDE.md` を生成します。
 - `CLAUDE.md` の `<!-- agent-sync:start -->` / `<!-- agent-sync:end -->` マーカーの中だけを管理します。手書きの Claude 固有設定は保持されます。
-- 自分が作った symlink のみ `.claude/.agent-sync.json` で追跡し、消えた Skill の古い symlink だけを削除します。手動で作った `.claude/skills/` の中身には触りません。
+- `AGENTS.md` を削除すると、次回の同期で対応する管理ブロックを取り下げます。管理ブロックしか無かった `CLAUDE.md` は削除し、手書き部分がある場合はそれを残します。
+- agent-sync が作ったものだけを `.claude/.agent-sync.json` に、ターゲットごとに記録します。消えた Skill の古い symlink だけを削除し、手動で作った `.claude/skills/` の中身には触りません。
+- `.claude/skills/<name>` が既に存在し agent-sync が作ったものでない場合は、その Skill をリンクせずに stderr へ警告を出します。上書きはせず、終了コードも変えません。
+
+## 探索範囲
+
+`AGENTS.md` はリポジトリ全体から探しますが、次は対象外です。
+
+- ドットディレクトリ（`.git`, `.venv`, `.next` など）と `node_modules`（どの階層でも）
+- `build/`, `dist/`, `out/`, `target/`, `vendor/` は**リポジトリ直下のみ**。ネストした `internal/target/AGENTS.md` は通常のソースディレクトリなので対象に含めます
+- `.gitignore` で除外されているもの。ただし force-add 済みのファイルは対象に含め、git が使えない場合は除外しません
+
+Skill はリポジトリ直下の `.agents/skills/` だけを読みます。Claude Code が `.claude/skills` をプロジェクト直下からしか読まないためです。ネストした `.agents/skills` は、黙って無視せず「同期対象外」と警告します。
+
+状態ファイルは version 2 です。以前のビルドが書いた version 1 は、次回の同期時にその場で移行します。
 
 ## 使い方
 

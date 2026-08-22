@@ -23,6 +23,8 @@ demo/
         └── review  -> ../../.agents/skills/review
 ```
 
+`.agent-sync.json` には、agent-sync が所有しているものをターゲットごとに記録しています。自分が作った symlink と、管理ブロックを維持している対象ファイルです。この記録があるので後片付けができます。Skill や `AGENTS.md` を消せば、次の同期で自分が足したものだけを取り下げ、手で書いたものには触りません。
+
 `AGENTS.md` が source of truth です。`CLAUDE.md` の管理ブロックは次のように、同じディレクトリの `AGENTS.md` を読み込みます。
 
 ```markdown
