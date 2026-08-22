@@ -7,6 +7,10 @@ type SourceState struct {
 	// Warnings describe parts of the tree discovery could not or would not
 	// read, so a silently skipped directory is at least visible.
 	Warnings []string
+	// DiscoveryIncomplete is true when discovery had to skip a directory it
+	// could not read. A warning about an intentional exclusion, such as a
+	// nested skills directory, does not make discovery incomplete.
+	DiscoveryIncomplete bool
 }
 
 type Instruction struct {

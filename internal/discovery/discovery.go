@@ -59,6 +59,7 @@ func Discover(root string) (*model.SourceState, error) {
 			// must not take the whole run down: one unreadable directory
 			// anywhere in the tree used to abort discovery entirely.
 			if d != nil && d.IsDir() {
+				st.DiscoveryIncomplete = true
 				st.Warnings = append(st.Warnings, fmt.Sprintf("skipping %s: %v", displayPath(root, path), err))
 				return filepath.SkipDir
 			}

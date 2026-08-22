@@ -37,6 +37,46 @@ func TestCheckFlagAfterSubcommand(t *testing.T) {
 	}
 }
 
+func TestCheckFailsWhenDiscoveryIsIncomplete(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read anything")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("# Root\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(root, "secret")
+	if err := os.Mkdir(secret, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(orig)
+
+	if code := run([]string{"claude"}); code != 0 {
+		t.Fatalf("expected initial sync to succeed, got %d", code)
+	}
+	if err := os.Chmod(secret, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(secret, 0o755) })
+
+	out := captureStdout(t, func() {
+		if code := run([]string{"claude", "--check"}); code != 1 {
+			t.Fatalf("incomplete discovery must fail --check, got %d", code)
+		}
+	})
+	if !strings.Contains(out, "ERROR: discovery was incomplete") {
+		t.Fatalf("a failing --check must say why on stdout, got %q", out)
+	}
+}
+
 func TestApplyCreatesFiles(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("# Root\n"), 0o644); err != nil {

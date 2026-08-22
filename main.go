@@ -95,6 +95,13 @@ func run(args []string) int {
 	}
 
 	exit := 0
+	if *check && src.DiscoveryIncomplete {
+		// Say so on stdout alongside the per-action failures. The stderr
+		// warning explains which directory, but "warning" reads as survivable
+		// and would leave a red run with no ERROR line to find.
+		fmt.Println("ERROR: discovery was incomplete; cannot verify the repository is in sync")
+		exit = 1
+	}
 	for _, t := range targets {
 		plan, err := t.Plan(root, src)
 		if err != nil {

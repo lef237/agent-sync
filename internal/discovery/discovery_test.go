@@ -98,6 +98,9 @@ func TestDiscoverSkipsUnreadableDirectories(t *testing.T) {
 	if len(src.Warnings) != 1 || !strings.Contains(src.Warnings[0], "secret") {
 		t.Fatalf("expected a warning about the unreadable directory, got %v", src.Warnings)
 	}
+	if !src.DiscoveryIncomplete {
+		t.Fatal("unreadable directories must mark discovery incomplete")
+	}
 }
 
 func TestDiscoverWarnsAboutNestedSkills(t *testing.T) {
@@ -115,6 +118,9 @@ func TestDiscoverWarnsAboutNestedSkills(t *testing.T) {
 	}
 	if len(src.Warnings) != 1 || !strings.Contains(src.Warnings[0], "sub/.agents/skills") {
 		t.Fatalf("expected a warning about the nested skills, got %v", src.Warnings)
+	}
+	if src.DiscoveryIncomplete {
+		t.Fatal("intentional exclusions must not mark discovery incomplete")
 	}
 }
 

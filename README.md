@@ -38,6 +38,8 @@ For a guided, self-contained example, see the [demo guide](demo/README.md). A [J
 - `build/`, `dist/`, `out/`, `target/`, `vendor/` **at the repository root only** — a nested `internal/target/AGENTS.md` is an ordinary source directory and is picked up
 - anything `.gitignore` excludes; a force-added file still counts, and if git is unavailable nothing is excluded
 
+A directory that cannot be read is different from one deliberately excluded: it is skipped with a warning so the rest of the sync still runs, but `--check` fails, because agent-sync cannot claim a subtree it never saw is in sync.
+
 Skills are only read from `.agents/skills/` at the repository root, because Claude Code loads `.claude/skills` from the project root and nowhere else. A nested `.agents/skills` is reported as not synced rather than silently ignored.
 
 The state file is at version 2. A version 1 file written by an earlier build is migrated in place on the next sync.
