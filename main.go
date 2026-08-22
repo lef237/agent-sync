@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -38,12 +40,22 @@ func run(args []string) int {
 		fmt.Fprintf(fs.Output(), "usage: agent-sync [claude|all] [--check] [--dry-run] [--verbose]\n")
 		fs.PrintDefaults()
 	}
+	// flag writes both the help text and parse errors to the same stream.
+	// Help was explicitly asked for, so it belongs on stdout; a parse error
+	// does not.
+	fs.SetOutput(io.Discard)
 	if err := fs.Parse(args); err != nil {
-		if err == flag.ErrHelp {
+		if errors.Is(err, flag.ErrHelp) {
+			fs.SetOutput(os.Stdout)
+			fs.Usage()
 			return 0
 		}
+		fs.SetOutput(os.Stderr)
+		fmt.Fprintln(os.Stderr, "agent-sync:", err)
+		fs.Usage()
 		return 2
 	}
+	fs.SetOutput(os.Stderr)
 	if rest := fs.Args(); len(rest) > 0 {
 		fmt.Fprintln(os.Stderr, "agent-sync: unexpected argument:", strings.Join(rest, " "))
 		return 2
@@ -66,6 +78,12 @@ func run(args []string) int {
 	for _, w := range src.Warnings {
 		fmt.Fprintln(os.Stderr, "agent-sync: warning:", w)
 	}
+	if *verbose {
+		// Which directory agent-sync decided to treat as the repository is
+		// the least obvious part of a run, and the usual reason output is
+		// not what the user expected.
+		fmt.Printf("root: %s\n", root)
+	}
 
 	var targets []target.Target
 	switch targetName {
@@ -86,35 +104,32 @@ func run(args []string) int {
 		for _, w := range plan.Warnings {
 			fmt.Fprintln(os.Stderr, "agent-sync: warning:", w)
 		}
-		if *check {
-			if plan.Empty() {
-				continue
-			}
+		switch {
+		case *check:
 			for _, a := range plan.Actions {
 				fmt.Printf("ERROR: %s\n", a)
 				exit = 1
 			}
-			continue
-		}
-		if *dry {
+		case *dry:
 			for _, a := range plan.Actions {
 				fmt.Printf("WOULD %s\n", a)
 			}
-			continue
-		}
-		st, err := apply.LoadState(root)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "agent-sync:", err)
-			return 1
-		}
-		if err := apply.Apply(root, t.Name(), plan, st); err != nil {
-			fmt.Fprintln(os.Stderr, "agent-sync:", err)
-			return 1
-		}
-		if *verbose || !plan.Empty() {
+		default:
+			st, err := apply.LoadState(root)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "agent-sync:", err)
+				return 1
+			}
+			if err := apply.Apply(root, t.Name(), plan, st); err != nil {
+				fmt.Fprintln(os.Stderr, "agent-sync:", err)
+				return 1
+			}
 			for _, a := range plan.Actions {
 				fmt.Printf("%s\n", a)
 			}
+		}
+		if *verbose && plan.Empty() {
+			fmt.Printf("%s: already in sync\n", t.Name())
 		}
 	}
 	return exit
