@@ -264,3 +264,37 @@ func TestApplyKeepsTargetsIndependent(t *testing.T) {
 		}
 	}
 }
+
+// A link recorded by an older build on Windows holds backslashes. Comparing
+// it byte for byte against the slash-separated target agent-sync now plans
+// would read as "changed outside agent-sync".
+func TestSameLinkTargetIgnoresSeparatorStyle(t *testing.T) {
+	if !SameLinkTarget(`..\..\.agents\skills\review`, "../../.agents/skills/review") {
+		t.Fatal("separator style should not make two targets differ")
+	}
+	if SameLinkTarget("../../.agents/skills/review", "../../.agents/skills/release") {
+		t.Fatal("different targets must still differ")
+	}
+}
+
+func TestCreateReportsAPathThatAppearedDuringApply(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("appeared\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := Apply(root, "claude", &planner.Plan{Actions: []planner.Action{
+		planner.Create{Path: "CLAUDE.md", Content: "new\n"},
+	}}, &model.State{})
+	if err == nil {
+		t.Fatal("expected Create to refuse an occupied path")
+	}
+	if !strings.Contains(err.Error(), "appeared while applying") {
+		t.Fatalf("error should explain what happened, got %v", err)
+	}
+	if strings.Contains(err.Error(), ".agent-sync-") {
+		t.Fatalf("error should not leak the temporary file name, got %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "CLAUDE.md")); err != nil || string(got) != "appeared\n" {
+		t.Fatalf("existing file must be left alone: %q, %v", got, err)
+	}
+}

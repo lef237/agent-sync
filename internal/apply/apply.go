@@ -326,6 +326,20 @@ func applyAction(root string, a planner.Action, managed map[string]string, files
 	return nil
 }
 
+// SameLinkTarget compares two symlink targets. agent-sync writes them
+// slash-separated, but a link recorded by an older build on Windows holds
+// backslashes, so both sides are normalized before comparing. Without this a
+// separator mismatch reads as "changed outside agent-sync".
+//
+// Backslashes are replaced directly rather than through filepath.ToSlash,
+// which only rewrites the separator of the running platform and so would do
+// nothing to a Windows-written target read on Linux or macOS.
+func SameLinkTarget(a, b string) bool {
+	return slashPath(a) == slashPath(b)
+}
+
+func slashPath(p string) string { return strings.ReplaceAll(p, `\`, "/") }
+
 func skillName(path string) string {
 	return filepath.Base(filepath.FromSlash(filepath.Clean(path)))
 }
@@ -345,7 +359,7 @@ func createLink(root string, act planner.CreateLink) error {
 	if fi, err := os.Lstat(abs); err == nil {
 		if fi.Mode()&os.ModeSymlink != 0 {
 			cur, readErr := os.Readlink(abs)
-			if readErr == nil && cur == act.Target {
+			if readErr == nil && SameLinkTarget(cur, act.Target) {
 				return nil
 			}
 		}
@@ -358,7 +372,7 @@ func createLink(root string, act planner.CreateLink) error {
 		// A concurrent sync may have created the exact desired link. Accept
 		// that harmless race, but never remove an unexpected path.
 		if fi, lerr := os.Lstat(abs); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
-			if cur, rerr := os.Readlink(abs); rerr == nil && cur == act.Target {
+			if cur, rerr := os.Readlink(abs); rerr == nil && SameLinkTarget(cur, act.Target) {
 				return nil
 			}
 		}
@@ -428,7 +442,7 @@ func removeLink(root string, act planner.RemoveLink) error {
 	if err != nil {
 		return err
 	}
-	if act.Target == "" || cur != act.Target {
+	if act.Target == "" || !SameLinkTarget(cur, act.Target) {
 		return fmt.Errorf("%s changed since planning; leave it untouched", abs)
 	}
 	if err := os.Remove(abs); err != nil && !os.IsNotExist(err) {
@@ -456,7 +470,7 @@ func verifyLink(root, path, target string) error {
 	if err != nil {
 		return err
 	}
-	if target == "" || cur != target {
+	if target == "" || !SameLinkTarget(cur, target) {
 		return fmt.Errorf("%s changed since planning; leave it untouched", abs)
 	}
 	return nil
@@ -527,7 +541,13 @@ func writeAtomic(root, path string, content []byte, perm os.FileMode, createOnly
 	if createOnly {
 		// Hard-linking the completed temporary file gives create semantics
 		// without overwriting a path that appeared after planning.
-		return os.Link(tmpName, abs)
+		if err := os.Link(tmpName, abs); err != nil {
+			if os.IsExist(err) {
+				return fmt.Errorf("%s appeared while applying; remove it manually", abs)
+			}
+			return fmt.Errorf("create %s: %w", abs, err)
+		}
+		return nil
 	}
 	if err := os.Rename(tmpName, abs); err == nil {
 		return nil

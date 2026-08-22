@@ -130,6 +130,10 @@ func (t *Claude) planSkills(root string, src *model.SourceState, owned model.Tar
 		if err != nil {
 			return err
 		}
+		// Everything else agent-sync records is slash-separated; without this
+		// the state file would carry OS-specific separators, which matters
+		// because it is meant to be committed.
+		rel = filepath.ToSlash(rel)
 		fi, err := os.Lstat(dst)
 		if os.IsNotExist(err) {
 			p.Add(planner.CreateLink{Path: sk.Dst, Target: rel})
@@ -161,17 +165,17 @@ func (t *Claude) planSkills(root string, src *model.SourceState, owned model.Tar
 			// Legacy state recorded only names. Re-adopt an existing link only
 			// when its target exactly matches the deterministic target we would
 			// create; otherwise preserve it as a user-owned link.
-			if cur == rel {
+			if apply.SameLinkTarget(cur, rel) {
 				p.Add(planner.AdoptLink{Path: sk.Dst, Target: rel})
 			} else {
 				p.Add(planner.ForgetLink{Path: sk.Dst})
 			}
 			continue
 		}
-		if cur != link.Target {
+		if !apply.SameLinkTarget(cur, link.Target) {
 			return fmt.Errorf("%s was changed outside agent-sync; remove it manually", dst)
 		}
-		if cur != rel {
+		if !apply.SameLinkTarget(cur, rel) {
 			p.Add(planner.RemoveLink{Path: sk.Dst, Target: cur})
 			p.Add(planner.CreateLink{Path: sk.Dst, Target: rel})
 		}
@@ -202,7 +206,7 @@ func (t *Claude) planSkills(root string, src *model.SourceState, owned model.Tar
 		if err != nil {
 			return err
 		}
-		if link.Target != "" && cur == link.Target {
+		if link.Target != "" && apply.SameLinkTarget(cur, link.Target) {
 			p.Add(planner.RemoveLink{Path: relPath, Target: cur})
 		} else {
 			// The link was replaced or came from legacy state. Preserve it.
