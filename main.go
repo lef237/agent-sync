@@ -63,6 +63,9 @@ func run(args []string) int {
 		fmt.Fprintln(os.Stderr, "agent-sync:", err)
 		return 1
 	}
+	for _, w := range src.Warnings {
+		fmt.Fprintln(os.Stderr, "agent-sync: warning:", w)
+	}
 
 	var targets []target.Target
 	switch targetName {

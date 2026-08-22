@@ -4,6 +4,9 @@ type SourceState struct {
 	Root         string
 	Instructions []Instruction
 	Skills       []Skill
+	// Warnings describe parts of the tree discovery could not or would not
+	// read, so a silently skipped directory is at least visible.
+	Warnings []string
 }
 
 type Instruction struct {
