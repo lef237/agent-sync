@@ -42,7 +42,10 @@ agent-sync claude       # claude ターゲットだけを同期
 agent-sync --check      # 差分を検出して exit 1（CI 用）
 agent-sync --dry-run    # 変更内容だけ表示
 agent-sync --verbose    # 詳細出力
+agent-sync --version    # インストール済みのバージョンを表示
 ```
+
+`--version` は `go install` で入れたものならタグを、リポジトリで `go build` したものなら擬似バージョンとコミットを表示します。
 
 同期後の状態を確認できるデモは、[日本語ガイド](../demo/README.ja.md) を参照してください。英語版は [demo/README.md](../demo/README.md) です。
 

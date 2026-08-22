@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 	"strings"
 
 	"github.com/lef237/agent-sync/internal/apply"
@@ -36,8 +37,9 @@ func run(args []string) int {
 	check := fs.Bool("check", false, "check for differences without applying; exit 1 if any")
 	dry := fs.Bool("dry-run", false, "show what would be done without applying")
 	verbose := fs.Bool("verbose", false, "verbose output")
+	showVersion := fs.Bool("version", false, "print the version and exit")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "usage: agent-sync [claude|all] [--check] [--dry-run] [--verbose]\n")
+		fmt.Fprintf(fs.Output(), "usage: agent-sync [claude|all] [--check] [--dry-run] [--verbose] [--version]\n")
 		fs.PrintDefaults()
 	}
 	// flag writes both the help text and parse errors to the same stream.
@@ -59,6 +61,10 @@ func run(args []string) int {
 	if rest := fs.Args(); len(rest) > 0 {
 		fmt.Fprintln(os.Stderr, "agent-sync: unexpected argument:", strings.Join(rest, " "))
 		return 2
+	}
+	if *showVersion {
+		fmt.Println("agent-sync", version())
+		return 0
 	}
 
 	cwd, err := os.Getwd()
@@ -140,4 +146,38 @@ func run(args []string) int {
 		}
 	}
 	return exit
+}
+
+// version reports what this binary was built from. A binary installed with
+// "go install <module>@<version>" carries the tag; one built from a working
+// tree carries a pseudo-version, and falls back to the commit when the
+// toolchain stamped no version at all.
+func version() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	if v := info.Main.Version; v != "" && v != "(devel)" {
+		return v
+	}
+
+	var revision, modified string
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			revision = setting.Value
+		case "vcs.modified":
+			modified = setting.Value
+		}
+	}
+	if revision == "" {
+		return "(devel)"
+	}
+	if len(revision) > 12 {
+		revision = revision[:12]
+	}
+	if modified == "true" {
+		return "(devel " + revision + "+dirty)"
+	}
+	return "(devel " + revision + ")"
 }

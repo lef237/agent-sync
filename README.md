@@ -11,7 +11,11 @@ go install github.com/lef237/agent-sync@latest
 agent-sync            # sync all targets
 agent-sync --check    # detect differences; exit 1 if any (for CI)
 agent-sync --dry-run  # show what would change without applying
+agent-sync --version  # print the installed version
 ```
+
+`--version` prints the tag for a binary installed with `go install`, and a
+pseudo-version with the commit for one built from a working tree.
 
 For a guided, self-contained example, see the [demo guide](demo/README.md). A [Japanese version](demo/README.ja.md) is also available.
 

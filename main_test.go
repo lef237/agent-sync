@@ -193,3 +193,36 @@ func captureStdout(t *testing.T, fn func()) string {
 	}
 	return out
 }
+
+func TestVersionFlagPrintsSomething(t *testing.T) {
+	out := captureStdout(t, func() {
+		if code := run([]string{"--version"}); code != 0 {
+			t.Fatalf("expected --version to return 0, got %d", code)
+		}
+	})
+	rest, ok := strings.CutPrefix(strings.TrimSpace(out), "agent-sync ")
+	if !ok || rest == "" {
+		t.Fatalf("--version should print a version, got %q", out)
+	}
+}
+
+// --version must not need a repository, so it stays usable from anywhere.
+func TestVersionFlagWorksOutsideARepository(t *testing.T) {
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(orig)
+
+	out := captureStdout(t, func() {
+		if code := run([]string{"--version"}); code != 0 {
+			t.Fatalf("expected --version to return 0, got %d", code)
+		}
+	})
+	if !strings.HasPrefix(out, "agent-sync ") {
+		t.Fatalf("unexpected output %q", out)
+	}
+}
