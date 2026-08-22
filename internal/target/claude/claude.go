@@ -55,7 +55,10 @@ func (t *Claude) planInstructions(root string, src *model.SourceState, p *planne
 		if err != nil {
 			return err
 		}
-		next, changed := planner.ApplyManagedBlock(string(existing), block)
+		next, changed, err := planner.ApplyManagedBlock(string(existing), block)
+		if err != nil {
+			return fmt.Errorf("%s: %w", relPath, err)
+		}
 		if changed {
 			p.Add(planner.Update{Path: relPath, Content: next})
 		}
