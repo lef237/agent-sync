@@ -560,3 +560,56 @@ func syncOnce(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 }
+
+// Both of these used to be silent: the skill was never linked, yet the sync
+// and --check both reported success.
+func TestSyncWarnsWhenDestinationIsOccupied(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "AGENTS.md", "# Root\n")
+	write(t, root, ".agents/skills/review/SKILL.md", "---\nname: review\n---\n")
+	write(t, root, ".claude/skills/review/NOTE.md", "unrelated\n")
+
+	plan := planOnce(t, root)
+	if len(plan.Warnings) != 1 {
+		t.Fatalf("expected one warning, got %v", plan.Warnings)
+	}
+	if plan.Warnings[0].Path != ".claude/skills/review" {
+		t.Fatalf("unexpected warning: %v", plan.Warnings[0])
+	}
+	for _, action := range plan.Actions {
+		if a, ok := action.(planner.CreateLink); ok && a.Path == ".claude/skills/review" {
+			t.Fatalf("an occupied destination must not be taken over: %v", action)
+		}
+	}
+}
+
+func TestSyncWarnsAboutAUserSymlinkShadowingASkill(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "AGENTS.md", "# Root\n")
+	write(t, root, ".agents/skills/review/SKILL.md", "---\nname: review\n---\n")
+	userTarget := filepath.Join(root, "user-review")
+	if err := os.MkdirAll(userTarget, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(root, ".claude", "skills", "review")
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(userTarget, dst); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := planOnce(t, root)
+	if len(plan.Warnings) != 1 || plan.Warnings[0].Path != ".claude/skills/review" {
+		t.Fatalf("expected a warning about the shadowing symlink, got %v", plan.Warnings)
+	}
+}
+
+func TestSyncIsQuietWhenNothingConflicts(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "AGENTS.md", "# Root\n")
+	write(t, root, ".agents/skills/review/SKILL.md", "---\nname: review\n---\n")
+	if plan := planOnce(t, root); len(plan.Warnings) != 0 {
+		t.Fatalf("expected no warnings, got %v", plan.Warnings)
+	}
+}

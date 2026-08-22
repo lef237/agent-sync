@@ -80,6 +80,9 @@ func run(args []string) int {
 			fmt.Fprintln(os.Stderr, "agent-sync:", err)
 			return 1
 		}
+		for _, w := range plan.Warnings {
+			fmt.Fprintln(os.Stderr, "agent-sync: warning:", w)
+		}
 		if *check {
 			if plan.Empty() {
 				continue

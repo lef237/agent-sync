@@ -78,8 +78,21 @@ func (a StripFile) String() string  { return "unmanage " + a.Path }
 func (a RemoveFile) String() string { return "remove " + a.Path }
 func (a ForgetFile) String() string { return "forget " + a.Path }
 
+// Warning is something the user needs to know that agent-sync will not act on
+// by itself, such as a destination it refuses to take over. Warnings are
+// reported in every mode but never change the exit code: the tool has
+// deliberately left the path alone, and failing would leave no way forward
+// except the manual fix the warning already asks for.
+type Warning struct {
+	Path   string
+	Reason string
+}
+
+func (w Warning) String() string { return w.Path + ": " + w.Reason }
+
 type Plan struct {
-	Actions []Action
+	Actions  []Action
+	Warnings []Warning
 	// KeptFiles are managed files already in their desired state. They need no
 	// action, but Apply records them so ownership tracking bootstraps for
 	// repositories that were synced before file tracking existed.
@@ -89,6 +102,10 @@ type Plan struct {
 func (p *Plan) Add(a Action) { p.Actions = append(p.Actions, a) }
 
 func (p *Plan) Keep(path string) { p.KeptFiles = append(p.KeptFiles, path) }
+
+func (p *Plan) Warn(path, reason string) {
+	p.Warnings = append(p.Warnings, Warning{Path: path, Reason: reason})
+}
 
 // Empty reports whether the plan would change anything on disk. Kept files
 // deliberately do not count: recording ownership of an already-correct file is

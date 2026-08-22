@@ -142,6 +142,7 @@ func (t *Claude) planSkills(root string, src *model.SourceState, owned model.Tar
 			if _, ok := managed[sk.Name]; ok {
 				return fmt.Errorf("%s is managed by agent-sync but is no longer a symlink; remove it manually", dst)
 			}
+			p.Warn(sk.Dst, "already exists and was not created by agent-sync, so skill "+sk.Name+" is not linked; remove it to let agent-sync manage the skill")
 			continue
 		}
 		cur, err := os.Readlink(dst)
@@ -153,6 +154,7 @@ func (t *Claude) planSkills(root string, src *model.SourceState, owned model.Tar
 		if !isManaged {
 			// A symlink that is not recorded as ours belongs to the user,
 			// even when it has the same skill name.
+			p.Warn(sk.Dst, "is a symlink agent-sync did not create, so skill "+sk.Name+" still points at "+cur+" instead of "+sk.Src)
 			continue
 		}
 		if link.Target == "" {
