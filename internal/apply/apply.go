@@ -3,6 +3,7 @@ package apply
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -106,24 +107,62 @@ func validSkillName(name string) bool {
 }
 
 func SaveState(root string, st *model.State) error {
+	b, err := encodeState(st)
+	if err != nil {
+		return err
+	}
+	return writeState(root, b)
+}
+
+// saveStateIfChanged writes the state file only when its contents would
+// actually differ. A repository with nothing to track should not grow a
+// .claude directory just because agent-sync ran.
+func saveStateIfChanged(root string, st *model.State) error {
+	next, err := encodeState(st)
+	if err != nil {
+		return err
+	}
+	relPath := filepath.ToSlash(filepath.Join(".claude", stateFileName))
+	if err := ValidateOutputPath(root, relPath); err != nil {
+		return err
+	}
+
+	current, err := os.ReadFile(StatePath(root))
+	switch {
+	case os.IsNotExist(err):
+		if len(st.ManagedSymlinks) == 0 {
+			return nil
+		}
+	case err != nil:
+		return fmt.Errorf("read %s: %w", StatePath(root), err)
+	case bytes.Equal(current, next):
+		return nil
+	}
+	return writeState(root, next)
+}
+
+func encodeState(st *model.State) ([]byte, error) {
 	if st == nil {
-		return fmt.Errorf("cannot save a nil state")
+		return nil, fmt.Errorf("cannot save a nil state")
 	}
 	if st.Version == 0 {
 		st.Version = 1
 	}
 	if st.Version != 1 {
-		return fmt.Errorf("unsupported state version %d", st.Version)
+		return nil, fmt.Errorf("unsupported state version %d", st.Version)
 	}
 	if err := validateState(st); err != nil {
-		return err
+		return nil, err
 	}
 
 	b, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	b = append(b, '\n')
+	return append(b, '\n'), nil
+}
+
+func writeState(root string, b []byte) error {
 	relPath := filepath.ToSlash(filepath.Join(".claude", stateFileName))
 	return writeAtomic(root, relPath, b, 0o644, false)
 }
@@ -138,35 +177,11 @@ func Apply(root string, plan *planner.Plan, st *model.State) error {
 		managed[link.Name] = link.Target
 	}
 
+	var applyErr error
 	for _, a := range plan.Actions {
-		switch act := a.(type) {
-		case planner.Create:
-			if err := writeFile(root, act.Path, act.Content, true); err != nil {
-				return err
-			}
-		case planner.Update:
-			if err := writeFile(root, act.Path, act.Content, false); err != nil {
-				return err
-			}
-		case planner.CreateLink:
-			if err := createLink(root, act); err != nil {
-				return err
-			}
-			managed[skillName(act.Path)] = act.Target
-		case planner.AdoptLink:
-			if err := verifyLink(root, act.Path, act.Target); err != nil {
-				return err
-			}
-			managed[skillName(act.Path)] = act.Target
-		case planner.RemoveLink:
-			if err := removeLink(root, act); err != nil {
-				return err
-			}
-			delete(managed, skillName(act.Path))
-		case planner.ForgetLink:
-			delete(managed, skillName(act.Path))
-		default:
-			return fmt.Errorf("unsupported action %T", a)
+		if err := applyAction(root, a, managed); err != nil {
+			applyErr = err
+			break
 		}
 	}
 
@@ -180,7 +195,46 @@ func Apply(root string, plan *planner.Plan, st *model.State) error {
 	sort.Slice(st.ManagedSymlinks, func(i, j int) bool {
 		return st.ManagedSymlinks[i].Name < st.ManagedSymlinks[j].Name
 	})
-	return SaveState(root, st)
+
+	// Persist what actually happened even when an action failed. Links created
+	// before the failure would otherwise be left on disk with no recorded
+	// owner, and every later run would mistake them for user-created links.
+	if err := saveStateIfChanged(root, st); err != nil {
+		if applyErr != nil {
+			return errors.Join(applyErr, err)
+		}
+		return err
+	}
+	return applyErr
+}
+
+func applyAction(root string, a planner.Action, managed map[string]string) error {
+	switch act := a.(type) {
+	case planner.Create:
+		return writeFile(root, act.Path, act.Content, true)
+	case planner.Update:
+		return writeFile(root, act.Path, act.Content, false)
+	case planner.CreateLink:
+		if err := createLink(root, act); err != nil {
+			return err
+		}
+		managed[skillName(act.Path)] = act.Target
+	case planner.AdoptLink:
+		if err := verifyLink(root, act.Path, act.Target); err != nil {
+			return err
+		}
+		managed[skillName(act.Path)] = act.Target
+	case planner.RemoveLink:
+		if err := removeLink(root, act); err != nil {
+			return err
+		}
+		delete(managed, skillName(act.Path))
+	case planner.ForgetLink:
+		delete(managed, skillName(act.Path))
+	default:
+		return fmt.Errorf("unsupported action %T", a)
+	}
+	return nil
 }
 
 func skillName(path string) string {
