@@ -11,6 +11,10 @@
           "name": "review",
           "target": "../../.agents/skills/review"
         }
+      ],
+      "managedFiles": [
+        "CLAUDE.md",
+        "services/billing/CLAUDE.md"
       ]
     }
   }

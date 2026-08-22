@@ -20,21 +20,28 @@ func New() *Claude { return &Claude{} }
 func (t *Claude) Name() string { return "claude" }
 
 func (t *Claude) Plan(root string, src *model.SourceState) (*planner.Plan, error) {
-	p := &planner.Plan{}
-	if err := t.planInstructions(root, src, p); err != nil {
+	st, err := apply.LoadState(root)
+	if err != nil {
 		return nil, err
 	}
-	if err := t.planSkills(root, src, p); err != nil {
+	owned := st.Target(t.Name())
+
+	p := &planner.Plan{}
+	if err := t.planInstructions(root, src, owned, p); err != nil {
+		return nil, err
+	}
+	if err := t.planSkills(root, src, owned, p); err != nil {
 		return nil, err
 	}
 	return p, nil
 }
 
-func (t *Claude) planInstructions(root string, src *model.SourceState, p *planner.Plan) error {
+func (t *Claude) planInstructions(root string, src *model.SourceState, owned model.TargetState, p *planner.Plan) error {
 	byDir := map[string][]model.Instruction{}
 	for _, in := range src.Instructions {
 		byDir[in.Dir] = append(byDir[in.Dir], in)
 	}
+	desired := make(map[string]bool, len(byDir))
 	for _, dir := range sortedKeys(byDir) {
 		importTarget := "AGENTS.md"
 		for _, in := range byDir[dir] {
@@ -44,6 +51,7 @@ func (t *Claude) planInstructions(root string, src *model.SourceState, p *planne
 		}
 		block := planner.StartMarker + "\n@" + importTarget + "\n" + planner.EndMarker
 		relPath := filepath.ToSlash(filepath.Join(dir, "CLAUDE.md"))
+		desired[relPath] = true
 		if err := apply.ValidateOutputPath(root, relPath); err != nil {
 			return err
 		}
@@ -61,17 +69,51 @@ func (t *Claude) planInstructions(root string, src *model.SourceState, p *planne
 		}
 		if changed {
 			p.Add(planner.Update{Path: relPath, Content: next})
+			continue
+		}
+		p.Keep(relPath)
+	}
+
+	return t.planStaleInstructions(root, owned, desired, p)
+}
+
+// planStaleInstructions withdraws blocks whose AGENTS.md is gone. Without it a
+// CLAUDE.md kept importing a file that no longer existed, and --check still
+// called the repository in sync.
+func (t *Claude) planStaleInstructions(root string, owned model.TargetState, desired map[string]bool, p *planner.Plan) error {
+	for _, relPath := range owned.ManagedFiles {
+		if desired[relPath] {
+			continue
+		}
+		if err := apply.ValidateOutputPath(root, relPath); err != nil {
+			return err
+		}
+		existing, err := os.ReadFile(filepath.Join(root, relPath))
+		if os.IsNotExist(err) {
+			p.Add(planner.ForgetFile{Path: relPath})
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		next, changed, err := planner.StripManagedBlock(string(existing))
+		if err != nil {
+			return fmt.Errorf("%s: %w", relPath, err)
+		}
+		switch {
+		case !changed:
+			// Nothing of ours is left in there to withdraw.
+			p.Add(planner.ForgetFile{Path: relPath})
+		case strings.TrimSpace(next) == "":
+			p.Add(planner.RemoveFile{Path: relPath})
+		default:
+			p.Add(planner.StripFile{Path: relPath, Content: next})
 		}
 	}
 	return nil
 }
 
-func (t *Claude) planSkills(root string, src *model.SourceState, p *planner.Plan) error {
-	st, err := apply.LoadState(root)
-	if err != nil {
-		return err
-	}
-	owned := st.Target(t.Name())
+func (t *Claude) planSkills(root string, src *model.SourceState, owned model.TargetState, p *planner.Plan) error {
 	managed := make(map[string]model.ManagedSymlink, len(owned.ManagedSymlinks))
 	for _, link := range owned.ManagedSymlinks {
 		managed[link.Name] = link

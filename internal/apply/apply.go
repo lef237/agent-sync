@@ -118,6 +118,31 @@ func validateState(st *model.State) error {
 			}
 			seen[link.Name] = true
 		}
+
+		seenFiles := make(map[string]bool, len(ts.ManagedFiles))
+		for _, path := range ts.ManagedFiles {
+			if err := validManagedFile(path); err != nil {
+				return fmt.Errorf("target %q: %w", name, err)
+			}
+			if seenFiles[path] {
+				return fmt.Errorf("target %q: duplicate managed file %q", name, path)
+			}
+			seenFiles[path] = true
+		}
+	}
+	return nil
+}
+
+// validManagedFile requires a normalized, slash-separated path inside the
+// repository, so a hand-edited state file cannot point the cleanup pass at
+// something outside it.
+func validManagedFile(path string) error {
+	clean, err := cleanRelative(path)
+	if err != nil {
+		return fmt.Errorf("invalid managed file %q: %w", path, err)
+	}
+	if filepath.ToSlash(clean) != path {
+		return fmt.Errorf("managed file %q is not a normalized relative path", path)
 	}
 	return nil
 }
@@ -206,14 +231,29 @@ func Apply(root, targetName string, plan *planner.Plan, st *model.State) error {
 	for _, link := range ts.ManagedSymlinks {
 		managed[link.Name] = link.Target
 	}
+	files := make(map[string]bool, len(ts.ManagedFiles)+len(plan.KeptFiles))
+	for _, path := range ts.ManagedFiles {
+		files[path] = true
+	}
+	// Files the plan verified as already correct are ours regardless of how
+	// the rest of the plan goes.
+	for _, path := range plan.KeptFiles {
+		files[path] = true
+	}
 
 	var applyErr error
 	for _, a := range plan.Actions {
-		if err := applyAction(root, a, managed); err != nil {
+		if err := applyAction(root, a, managed, files); err != nil {
 			applyErr = err
 			break
 		}
 	}
+
+	ts.ManagedFiles = make([]string, 0, len(files))
+	for path := range files {
+		ts.ManagedFiles = append(ts.ManagedFiles, path)
+	}
+	sort.Strings(ts.ManagedFiles)
 
 	ts.ManagedSymlinks = make([]model.ManagedSymlink, 0, len(managed))
 	for name, target := range managed {
@@ -239,12 +279,30 @@ func Apply(root, targetName string, plan *planner.Plan, st *model.State) error {
 	return applyErr
 }
 
-func applyAction(root string, a planner.Action, managed map[string]string) error {
+func applyAction(root string, a planner.Action, managed map[string]string, files map[string]bool) error {
 	switch act := a.(type) {
 	case planner.Create:
-		return writeFile(root, act.Path, act.Content, true)
+		if err := writeFile(root, act.Path, act.Content, true); err != nil {
+			return err
+		}
+		files[act.Path] = true
 	case planner.Update:
-		return writeFile(root, act.Path, act.Content, false)
+		if err := writeFile(root, act.Path, act.Content, false); err != nil {
+			return err
+		}
+		files[act.Path] = true
+	case planner.StripFile:
+		if err := writeFile(root, act.Path, act.Content, false); err != nil {
+			return err
+		}
+		delete(files, act.Path)
+	case planner.RemoveFile:
+		if err := removeManagedFile(root, act.Path); err != nil {
+			return err
+		}
+		delete(files, act.Path)
+	case planner.ForgetFile:
+		delete(files, act.Path)
 	case planner.CreateLink:
 		if err := createLink(root, act); err != nil {
 			return err
@@ -307,6 +365,45 @@ func createLink(root string, act planner.CreateLink) error {
 		return err
 	}
 	return nil
+}
+
+// removeManagedFile deletes a file agent-sync fully owned. It re-checks that
+// nothing but the managed block is in there, so content written between
+// planning and applying is never thrown away.
+func removeManagedFile(root, path string) error {
+	if err := ValidateOutputPath(root, path); err != nil {
+		return err
+	}
+	_, abs, _, err := safeAbs(root, path)
+	if err != nil {
+		return err
+	}
+	fi, err := os.Lstat(abs)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is a symlink; remove it manually", abs)
+	}
+	if fi.IsDir() {
+		return fmt.Errorf("%s is a directory", abs)
+	}
+
+	b, err := os.ReadFile(abs)
+	if err != nil {
+		return err
+	}
+	rest, _, err := planner.StripManagedBlock(string(b))
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	if strings.TrimSpace(rest) != "" {
+		return fmt.Errorf("%s gained content since planning; leave it untouched", abs)
+	}
+	return os.Remove(abs)
 }
 
 func removeLink(root string, act planner.RemoveLink) error {

@@ -129,19 +129,38 @@ func TestApplyPersistsStateWhenAnActionFails(t *testing.T) {
 	}
 }
 
-func TestApplyLeavesStateFileAloneWhenNothingIsTracked(t *testing.T) {
+func TestApplyLeavesStateFileAloneWhenThereIsNothingToOwn(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("# Root\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	plan := &planner.Plan{Actions: []planner.Action{
-		planner.Create{Path: "CLAUDE.md", Content: "hi\n"},
-	}}
-	if err := Apply(root, "claude", plan, &model.State{}); err != nil {
+	if err := Apply(root, "claude", &planner.Plan{}, &model.State{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".claude")); !os.IsNotExist(err) {
-		t.Fatalf("a repository with no skills should not gain a .claude directory, err=%v", err)
+		t.Fatalf("a repository with nothing to own should not gain a .claude directory, err=%v", err)
+	}
+}
+
+func TestApplyRecordsGeneratedFiles(t *testing.T) {
+	root := t.TempDir()
+	plan := &planner.Plan{
+		Actions:   []planner.Action{planner.Create{Path: "CLAUDE.md", Content: "hi\n"}},
+		KeptFiles: []string{"services/billing/CLAUDE.md"},
+	}
+	if err := Apply(root, "claude", plan, &model.State{}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := loaded.Target("claude").ManagedFiles
+	want := []string{"CLAUDE.md", "services/billing/CLAUDE.md"}
+	if len(got) != len(want) {
+		t.Fatalf("managed files = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("managed files = %v, want %v", got, want)
+		}
 	}
 }
 

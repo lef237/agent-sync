@@ -34,7 +34,12 @@ type State struct {
 
 // TargetState is one target's ownership record.
 type TargetState struct {
+	// ManagedSymlinks are the links agent-sync created for this target.
 	ManagedSymlinks []ManagedSymlink `json:"managedSymlinks,omitempty"`
+	// ManagedFiles are the files whose agent-sync block this target
+	// maintains, as repository-relative slash-separated paths. Tracking them
+	// is what lets a block be withdrawn once its AGENTS.md is gone.
+	ManagedFiles []string `json:"managedFiles,omitempty"`
 }
 
 // ManagedSymlink records the exact link target that agent-sync created.
@@ -56,7 +61,7 @@ func (s *State) Target(name string) TargetState {
 // SetTarget stores ts under name, dropping the entry entirely when the target
 // owns nothing so an inactive target leaves no residue in the state file.
 func (s *State) SetTarget(name string, ts TargetState) {
-	if len(ts.ManagedSymlinks) == 0 {
+	if len(ts.ManagedSymlinks) == 0 && len(ts.ManagedFiles) == 0 {
 		delete(s.Targets, name)
 		return
 	}

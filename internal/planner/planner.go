@@ -48,19 +48,51 @@ type ForgetLink struct {
 	Path string
 }
 
+// StripFile rewrites a file with the managed block removed and gives up
+// ownership of it. It is used when the AGENTS.md a block imported is gone but
+// the file still holds hand-written content worth keeping.
+type StripFile struct {
+	Path    string
+	Content string
+}
+
+// RemoveFile deletes a file agent-sync fully owned and gives up ownership. It
+// is only planned when nothing but the managed block is left in it.
+type RemoveFile struct {
+	Path string
+}
+
+// ForgetFile drops a file from the managed state without touching the
+// filesystem, for when there is nothing of ours left in it to withdraw.
+type ForgetFile struct {
+	Path string
+}
+
 func (a Create) String() string     { return "create " + a.Path }
 func (a Update) String() string     { return "update " + a.Path }
 func (a CreateLink) String() string { return "link " + a.Path + " -> " + a.Target }
 func (a AdoptLink) String() string  { return "adopt " + a.Path + " -> " + a.Target }
 func (a RemoveLink) String() string { return "remove " + a.Path }
 func (a ForgetLink) String() string { return "forget " + a.Path }
+func (a StripFile) String() string  { return "unmanage " + a.Path }
+func (a RemoveFile) String() string { return "remove " + a.Path }
+func (a ForgetFile) String() string { return "forget " + a.Path }
 
 type Plan struct {
 	Actions []Action
+	// KeptFiles are managed files already in their desired state. They need no
+	// action, but Apply records them so ownership tracking bootstraps for
+	// repositories that were synced before file tracking existed.
+	KeptFiles []string
 }
 
 func (p *Plan) Add(a Action) { p.Actions = append(p.Actions, a) }
 
+func (p *Plan) Keep(path string) { p.KeptFiles = append(p.KeptFiles, path) }
+
+// Empty reports whether the plan would change anything on disk. Kept files
+// deliberately do not count: recording ownership of an already-correct file is
+// not a difference for --check to report.
 func (p *Plan) Empty() bool { return len(p.Actions) == 0 }
 
 // blockRange is a half-open [start, end) span covering one managed block,
@@ -148,4 +180,18 @@ func cutBlocks(s string, from int, blocks []blockRange) string {
 	}
 	b.WriteString(s[prev:])
 	return b.String()
+}
+
+// StripManagedBlock removes every managed block from existing and reports
+// whether anything was removed.
+func StripManagedBlock(existing string) (string, bool, error) {
+	blocks, err := findManagedBlocks(existing)
+	if err != nil {
+		return "", false, err
+	}
+	if len(blocks) == 0 {
+		return existing, false, nil
+	}
+	next := cutBlocks(existing, 0, blocks)
+	return next, next != existing, nil
 }

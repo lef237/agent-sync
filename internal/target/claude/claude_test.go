@@ -454,3 +454,109 @@ func read(t *testing.T, root, rel string) string {
 	}
 	return string(b)
 }
+
+// A CLAUDE.md agent-sync generated used to keep importing an AGENTS.md that
+// had been deleted, and --check still called the repository in sync.
+func TestSyncRemovesGeneratedFileWhenAgentsFileDisappears(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "AGENTS.md", "# Root\n")
+	write(t, root, "services/billing/AGENTS.md", "# Billing\n")
+	syncOnce(t, root)
+
+	if err := os.Remove(filepath.Join(root, "services", "billing", "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+	syncOnce(t, root)
+
+	if _, err := os.Stat(filepath.Join(root, "services", "billing", "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Fatalf("generated CLAUDE.md should be withdrawn, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "CLAUDE.md")); err != nil {
+		t.Fatalf("root CLAUDE.md should survive: %v", err)
+	}
+
+	st, err := apply.LoadState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := st.Target("claude").ManagedFiles
+	if len(files) != 1 || files[0] != "CLAUDE.md" {
+		t.Fatalf("stale file still tracked: %v", files)
+	}
+	if plan := planOnce(t, root); !plan.Empty() {
+		t.Fatalf("expected an empty plan after cleanup, got %v", plan.Actions)
+	}
+}
+
+func TestSyncKeepsHandWrittenContentWhenAgentsFileDisappears(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "AGENTS.md", "# Root\n")
+	write(t, root, "CLAUDE.md", "## Claude only\n\nkeep me\n")
+	syncOnce(t, root)
+
+	if err := os.Remove(filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+	syncOnce(t, root)
+
+	content := read(t, root, "CLAUDE.md")
+	if strings.Contains(content, planner.StartMarker) || strings.Contains(content, "@AGENTS.md") {
+		t.Fatalf("managed block should be withdrawn:\n%s", content)
+	}
+	if !strings.Contains(content, "keep me") {
+		t.Fatalf("hand-written content lost:\n%s", content)
+	}
+	if plan := planOnce(t, root); !plan.Empty() {
+		t.Fatalf("expected an empty plan after cleanup, got %v", plan.Actions)
+	}
+}
+
+// If the user removed the block themselves, agent-sync should let go of the
+// file without rewriting it.
+func TestSyncForgetsFileTheUserAlreadyCleaned(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "AGENTS.md", "# Root\n")
+	syncOnce(t, root)
+
+	if err := os.Remove(filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+	write(t, root, "CLAUDE.md", "hand written\n")
+	syncOnce(t, root)
+
+	if got := read(t, root, "CLAUDE.md"); got != "hand written\n" {
+		t.Fatalf("file should be left alone, got %q", got)
+	}
+	st, err := apply.LoadState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if files := st.Target("claude").ManagedFiles; len(files) != 0 {
+		t.Fatalf("file should be forgotten: %v", files)
+	}
+}
+
+func planOnce(t *testing.T, root string) *planner.Plan {
+	t.Helper()
+	src, err := discovery.Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := New().Plan(root, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plan
+}
+
+func syncOnce(t *testing.T, root string) {
+	t.Helper()
+	plan := planOnce(t, root)
+	st, err := apply.LoadState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := apply.Apply(root, "claude", plan, st); err != nil {
+		t.Fatal(err)
+	}
+}
