@@ -202,6 +202,11 @@ func encodeState(st *model.State) ([]byte, error) {
 	if err := validateState(st); err != nil {
 		return nil, err
 	}
+	if st.Targets == nil {
+		// Write "targets": {} rather than null, so a state file that owns
+		// nothing still reads as a state file.
+		st.Targets = map[string]model.TargetState{}
+	}
 
 	b, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {

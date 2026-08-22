@@ -42,6 +42,8 @@ Skills are only read from `.agents/skills/` at the repository root, because Clau
 
 The state file is at version 2. A version 1 file written by an earlier build is migrated in place on the next sync.
 
+Skill syncing creates symlinks, which on Windows requires Developer Mode or an elevated shell. Instruction syncing works either way.
+
 ## Build & test
 
 ```bash
