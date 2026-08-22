@@ -101,7 +101,7 @@ func run(args []string) int {
 			fmt.Fprintln(os.Stderr, "agent-sync:", err)
 			return 1
 		}
-		if err := apply.Apply(root, plan, st); err != nil {
+		if err := apply.Apply(root, t.Name(), plan, st); err != nil {
 			fmt.Fprintln(os.Stderr, "agent-sync:", err)
 			return 1
 		}

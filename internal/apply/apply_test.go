@@ -23,8 +23,8 @@ func TestLoadStateMigratesLegacySymlinkNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(st.ManagedSymlinks) != 1 || st.ManagedSymlinks[0].Name != "review" || st.ManagedSymlinks[0].Target != "" {
-		t.Fatalf("unexpected migrated state: %#v", st.ManagedSymlinks)
+	if len(st.Target("claude").ManagedSymlinks) != 1 || st.Target("claude").ManagedSymlinks[0].Name != "review" || st.Target("claude").ManagedSymlinks[0].Target != "" {
+		t.Fatalf("unexpected migrated state: %#v", st.Target("claude").ManagedSymlinks)
 	}
 	if err := SaveState(root, st); err != nil {
 		t.Fatal(err)
@@ -77,8 +77,8 @@ func TestApplyRecordsManagedLinkTarget(t *testing.T) {
 	plan := &planner.Plan{Actions: []planner.Action{
 		planner.CreateLink{Path: ".claude/skills/review", Target: "../../.agents/skills/review"},
 	}}
-	st := &model.State{Version: 1}
-	if err := Apply(root, plan, st); err != nil {
+	st := &model.State{}
+	if err := Apply(root, "claude", plan, st); err != nil {
 		t.Fatal(err)
 	}
 
@@ -86,8 +86,8 @@ func TestApplyRecordsManagedLinkTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded.ManagedSymlinks) != 1 || loaded.ManagedSymlinks[0].Name != "review" || loaded.ManagedSymlinks[0].Target != "../../.agents/skills/review" {
-		t.Fatalf("unexpected managed link state: %#v", loaded.ManagedSymlinks)
+	if len(loaded.Target("claude").ManagedSymlinks) != 1 || loaded.Target("claude").ManagedSymlinks[0].Name != "review" || loaded.Target("claude").ManagedSymlinks[0].Target != "../../.agents/skills/review" {
+		t.Fatalf("unexpected managed link state: %#v", loaded.Target("claude").ManagedSymlinks)
 	}
 }
 
@@ -113,7 +113,7 @@ func TestApplyPersistsStateWhenAnActionFails(t *testing.T) {
 		planner.CreateLink{Path: ".claude/skills/aaa", Target: "../../.agents/skills/aaa"},
 		planner.CreateLink{Path: ".claude/skills/zzz", Target: "../../.agents/skills/zzz"},
 	}}
-	if err := Apply(root, plan, &model.State{Version: 1}); err == nil {
+	if err := Apply(root, "claude", plan, &model.State{}); err == nil {
 		t.Fatal("expected the second CreateLink to fail")
 	}
 
@@ -124,8 +124,8 @@ func TestApplyPersistsStateWhenAnActionFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded.ManagedSymlinks) != 1 || loaded.ManagedSymlinks[0].Name != "aaa" {
-		t.Fatalf("the created link must stay owned by agent-sync: %#v", loaded.ManagedSymlinks)
+	if len(loaded.Target("claude").ManagedSymlinks) != 1 || loaded.Target("claude").ManagedSymlinks[0].Name != "aaa" {
+		t.Fatalf("the created link must stay owned by agent-sync: %#v", loaded.Target("claude").ManagedSymlinks)
 	}
 }
 
@@ -137,7 +137,7 @@ func TestApplyLeavesStateFileAloneWhenNothingIsTracked(t *testing.T) {
 	plan := &planner.Plan{Actions: []planner.Action{
 		planner.Create{Path: "CLAUDE.md", Content: "hi\n"},
 	}}
-	if err := Apply(root, plan, &model.State{Version: 1}); err != nil {
+	if err := Apply(root, "claude", plan, &model.State{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".claude")); !os.IsNotExist(err) {
@@ -153,8 +153,8 @@ func TestApplyDoesNotRewriteAnUnchangedStateFile(t *testing.T) {
 	plan := &planner.Plan{Actions: []planner.Action{
 		planner.CreateLink{Path: ".claude/skills/review", Target: "../../.agents/skills/review"},
 	}}
-	st := &model.State{Version: 1}
-	if err := Apply(root, plan, st); err != nil {
+	st := &model.State{}
+	if err := Apply(root, "claude", plan, st); err != nil {
 		t.Fatal(err)
 	}
 	before, err := os.Stat(StatePath(root))
@@ -166,7 +166,7 @@ func TestApplyDoesNotRewriteAnUnchangedStateFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Apply(root, &planner.Plan{}, st2); err != nil {
+	if err := Apply(root, "claude", &planner.Plan{}, st2); err != nil {
 		t.Fatal(err)
 	}
 	after, err := os.Stat(StatePath(root))
@@ -175,5 +175,73 @@ func TestApplyDoesNotRewriteAnUnchangedStateFile(t *testing.T) {
 	}
 	if !after.ModTime().Equal(before.ModTime()) {
 		t.Fatal("an unchanged state file should not be rewritten")
+	}
+}
+
+func TestLoadStateMigratesVersion1IntoTheClaudeTarget(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	v1 := `{"version":1,"managedSymlinks":[{"name":"review","target":"../../.agents/skills/review"}]}`
+	if err := os.WriteFile(StatePath(root), []byte(v1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := LoadState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	links := st.Target("claude").ManagedSymlinks
+	if len(links) != 1 || links[0].Name != "review" || links[0].Target != "../../.agents/skills/review" {
+		t.Fatalf("version 1 state was not migrated: %#v", st)
+	}
+	if st.Version != model.StateVersion {
+		t.Fatalf("expected version %d, got %d", model.StateVersion, st.Version)
+	}
+}
+
+func TestLoadStateRejectsAFutureVersion(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	future := `{"version":99,"targets":{}}`
+	if err := os.WriteFile(StatePath(root), []byte(future), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadState(root); err == nil {
+		t.Fatal("a state written by a newer build must not be silently downgraded")
+	}
+}
+
+// Skill names are only unique within a target, so two targets syncing a skill
+// of the same name must not overwrite each other's ownership record.
+func TestApplyKeepsTargetsIndependent(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".agents", "skills", "review"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	st := &model.State{}
+	if err := Apply(root, "claude", &planner.Plan{Actions: []planner.Action{
+		planner.CreateLink{Path: ".claude/skills/review", Target: "../../.agents/skills/review"},
+	}}, st); err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(root, "cursor", &planner.Plan{Actions: []planner.Action{
+		planner.CreateLink{Path: ".cursor/skills/review", Target: "../../.agents/skills/review"},
+	}}, st); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"claude", "cursor"} {
+		links := loaded.Target(name).ManagedSymlinks
+		if len(links) != 1 || links[0].Name != "review" {
+			t.Fatalf("target %q lost its record: %#v", name, loaded.Targets)
+		}
 	}
 }

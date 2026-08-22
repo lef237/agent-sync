@@ -34,7 +34,7 @@ func TestSyncE2E(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := apply.Apply(root, plan, st); err != nil {
+	if err := apply.Apply(root, "claude", plan, st); err != nil {
 		t.Fatal(err)
 	}
 
@@ -83,7 +83,7 @@ func TestSyncOverridePriority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := apply.Apply(root, plan, st); err != nil {
+	if err := apply.Apply(root, "claude", plan, st); err != nil {
 		t.Fatal(err)
 	}
 	content := read(t, root, "CLAUDE.md")
@@ -112,7 +112,7 @@ func TestSyncStaleLinkRemoved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := apply.Apply(root, plan, st); err != nil {
+	if err := apply.Apply(root, "claude", plan, st); err != nil {
 		t.Fatal(err)
 	}
 
@@ -130,7 +130,7 @@ func TestSyncStaleLinkRemoved(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(root, ".claude", "skills", "review")); err != nil {
 		t.Fatal(err)
 	}
-	if err := apply.Apply(root, plan2, st); err != nil {
+	if err := apply.Apply(root, "claude", plan2, st); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(filepath.Join(root, ".claude", "skills", "review")); !os.IsNotExist(err) {
@@ -156,7 +156,7 @@ func TestSyncPreservesUserSkill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := apply.Apply(root, plan, st); err != nil {
+	if err := apply.Apply(root, "claude", plan, st); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".claude", "skills", "claude-only", "SKILL.md")); err != nil {
@@ -205,7 +205,7 @@ func TestSyncPreservesUserSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := apply.Apply(root, plan, st); err != nil {
+	if err := apply.Apply(root, "claude", plan, st); err != nil {
 		t.Fatal(err)
 	}
 	cur, err := os.Readlink(dst)
@@ -266,7 +266,7 @@ func TestSyncBackfillsLegacyManagedSymlinkTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := apply.Apply(root, plan, st); err != nil {
+	if err := apply.Apply(root, "claude", plan, st); err != nil {
 		t.Fatal(err)
 	}
 	cur, err := os.Readlink(dst)
@@ -280,8 +280,8 @@ func TestSyncBackfillsLegacyManagedSymlinkTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded.ManagedSymlinks) != 1 || loaded.ManagedSymlinks[0].Name != "review" || loaded.ManagedSymlinks[0].Target != target {
-		t.Fatalf("legacy target was not backfilled: %#v", loaded.ManagedSymlinks)
+	if len(loaded.Target("claude").ManagedSymlinks) != 1 || loaded.Target("claude").ManagedSymlinks[0].Name != "review" || loaded.Target("claude").ManagedSymlinks[0].Target != target {
+		t.Fatalf("legacy target was not backfilled: %#v", loaded.Target("claude").ManagedSymlinks)
 	}
 }
 
@@ -302,7 +302,7 @@ func TestSyncDoesNotRemoveReplacedManagedSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := apply.Apply(root, plan, st); err != nil {
+	if err := apply.Apply(root, "claude", plan, st); err != nil {
 		t.Fatal(err)
 	}
 
@@ -338,7 +338,7 @@ func TestSyncDoesNotRemoveReplacedManagedSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := apply.Apply(root, plan2, st2); err != nil {
+	if err := apply.Apply(root, "claude", plan2, st2); err != nil {
 		t.Fatal(err)
 	}
 	cur, err := os.Readlink(dst)
@@ -352,8 +352,8 @@ func TestSyncDoesNotRemoveReplacedManagedSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(st3.ManagedSymlinks) != 0 {
-		t.Fatalf("replaced link should be forgotten: %#v", st3.ManagedSymlinks)
+	if len(st3.Target("claude").ManagedSymlinks) != 0 {
+		t.Fatalf("replaced link should be forgotten: %#v", st3.Target("claude").ManagedSymlinks)
 	}
 }
 
@@ -374,7 +374,7 @@ func TestSyncForgetsMissingManagedSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := apply.Apply(root, plan, st); err != nil {
+	if err := apply.Apply(root, "claude", plan, st); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(filepath.Join(root, ".claude", "skills", "review")); err != nil {
@@ -396,15 +396,15 @@ func TestSyncForgetsMissingManagedSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := apply.Apply(root, plan2, st2); err != nil {
+	if err := apply.Apply(root, "claude", plan2, st2); err != nil {
 		t.Fatal(err)
 	}
 	st3, err := apply.LoadState(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(st3.ManagedSymlinks) != 0 {
-		t.Fatalf("missing link should be forgotten: %#v", st3.ManagedSymlinks)
+	if len(st3.Target("claude").ManagedSymlinks) != 0 {
+		t.Fatalf("missing link should be forgotten: %#v", st3.Target("claude").ManagedSymlinks)
 	}
 }
 

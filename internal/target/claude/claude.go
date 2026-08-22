@@ -71,8 +71,9 @@ func (t *Claude) planSkills(root string, src *model.SourceState, p *planner.Plan
 	if err != nil {
 		return err
 	}
-	managed := make(map[string]model.ManagedSymlink, len(st.ManagedSymlinks))
-	for _, link := range st.ManagedSymlinks {
+	owned := st.Target(t.Name())
+	managed := make(map[string]model.ManagedSymlink, len(owned.ManagedSymlinks))
+	for _, link := range owned.ManagedSymlinks {
 		managed[link.Name] = link
 	}
 	desired := map[string]bool{}
@@ -132,7 +133,7 @@ func (t *Claude) planSkills(root string, src *model.SourceState, p *planner.Plan
 		}
 	}
 
-	for _, link := range st.ManagedSymlinks {
+	for _, link := range owned.ManagedSymlinks {
 		if desired[link.Name] {
 			continue
 		}

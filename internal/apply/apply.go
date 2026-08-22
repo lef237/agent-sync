@@ -31,7 +31,7 @@ func LoadState(root string) (*model.State, error) {
 
 	b, err := os.ReadFile(StatePath(root))
 	if os.IsNotExist(err) {
-		return &model.State{Version: 1}, nil
+		return &model.State{Version: model.StateVersion}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", StatePath(root), err)
@@ -41,60 +41,83 @@ func LoadState(root string) (*model.State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("decode %s: %w", StatePath(root), err)
 	}
-	if st.Version == 0 {
-		st.Version = 1
-	}
-	if st.Version != 1 {
-		return nil, fmt.Errorf("unsupported state version %d in %s", st.Version, StatePath(root))
-	}
 	if err := validateState(st); err != nil {
 		return nil, fmt.Errorf("invalid state %s: %w", StatePath(root), err)
 	}
 	return st, nil
 }
 
-// decodeState accepts both the current object form and the original string
-// form of managedSymlinks so existing repositories can migrate safely.
+// legacyTarget owns everything recorded by version 1, which predates targets
+// and could only ever have described the claude adapter.
+const legacyTarget = "claude"
+
+// decodeState reads every state layout agent-sync has written: version 2 with
+// per-target records, version 1 with a flat managedSymlinks list, and the
+// original version 1 form where that list held bare skill names.
 func decodeState(b []byte) (*model.State, error) {
 	var raw struct {
-		Version         int             `json:"version"`
-		ManagedSymlinks json.RawMessage `json:"managedSymlinks"`
+		Version         int                          `json:"version"`
+		Targets         map[string]model.TargetState `json:"targets"`
+		ManagedSymlinks json.RawMessage              `json:"managedSymlinks"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return nil, err
 	}
-
-	st := &model.State{Version: raw.Version}
-	data := bytes.TrimSpace(raw.ManagedSymlinks)
-	if len(data) == 0 || bytes.Equal(data, []byte("null")) {
-		return st, nil
+	if raw.Version == 0 {
+		raw.Version = 1
+	}
+	if raw.Version > model.StateVersion {
+		return nil, fmt.Errorf("unsupported state version %d (this build writes %d)", raw.Version, model.StateVersion)
 	}
 
-	if err := json.Unmarshal(data, &st.ManagedSymlinks); err == nil {
-		return st, nil
+	st := &model.State{Version: model.StateVersion, Targets: raw.Targets}
+	if len(raw.Targets) == 0 {
+		links, err := decodeManagedSymlinks(raw.ManagedSymlinks)
+		if err != nil {
+			return nil, err
+		}
+		st.SetTarget(legacyTarget, model.TargetState{ManagedSymlinks: links})
+	}
+	return st, nil
+}
+
+func decodeManagedSymlinks(raw json.RawMessage) ([]model.ManagedSymlink, error) {
+	data := bytes.TrimSpace(raw)
+	if len(data) == 0 || bytes.Equal(data, []byte("null")) {
+		return nil, nil
+	}
+
+	var links []model.ManagedSymlink
+	if err := json.Unmarshal(data, &links); err == nil {
+		return links, nil
 	}
 
 	var legacy []string
 	if err := json.Unmarshal(data, &legacy); err != nil {
 		return nil, fmt.Errorf("managedSymlinks must be an array of managed links: %w", err)
 	}
-	st.ManagedSymlinks = nil
+	links = nil
 	for _, name := range legacy {
-		st.ManagedSymlinks = append(st.ManagedSymlinks, model.ManagedSymlink{Name: name})
+		links = append(links, model.ManagedSymlink{Name: name})
 	}
-	return st, nil
+	return links, nil
 }
 
 func validateState(st *model.State) error {
-	seen := make(map[string]bool, len(st.ManagedSymlinks))
-	for _, link := range st.ManagedSymlinks {
-		if !validSkillName(link.Name) {
-			return fmt.Errorf("invalid managed skill name %q", link.Name)
+	for name, ts := range st.Targets {
+		if name == "" {
+			return fmt.Errorf("empty target name")
 		}
-		if seen[link.Name] {
-			return fmt.Errorf("duplicate managed skill name %q", link.Name)
+		seen := make(map[string]bool, len(ts.ManagedSymlinks))
+		for _, link := range ts.ManagedSymlinks {
+			if !validSkillName(link.Name) {
+				return fmt.Errorf("target %q: invalid managed skill name %q", name, link.Name)
+			}
+			if seen[link.Name] {
+				return fmt.Errorf("target %q: duplicate managed skill name %q", name, link.Name)
+			}
+			seen[link.Name] = true
 		}
-		seen[link.Name] = true
 	}
 	return nil
 }
@@ -130,7 +153,7 @@ func saveStateIfChanged(root string, st *model.State) error {
 	current, err := os.ReadFile(StatePath(root))
 	switch {
 	case os.IsNotExist(err):
-		if len(st.ManagedSymlinks) == 0 {
+		if st.Empty() {
 			return nil
 		}
 	case err != nil:
@@ -146,10 +169,10 @@ func encodeState(st *model.State) ([]byte, error) {
 		return nil, fmt.Errorf("cannot save a nil state")
 	}
 	if st.Version == 0 {
-		st.Version = 1
+		st.Version = model.StateVersion
 	}
-	if st.Version != 1 {
-		return nil, fmt.Errorf("unsupported state version %d", st.Version)
+	if st.Version != model.StateVersion {
+		return nil, fmt.Errorf("cannot write state version %d (this build writes %d)", st.Version, model.StateVersion)
 	}
 	if err := validateState(st); err != nil {
 		return nil, err
@@ -167,13 +190,20 @@ func writeState(root string, b []byte) error {
 	return writeAtomic(root, relPath, b, 0o644, false)
 }
 
-func Apply(root string, plan *planner.Plan, st *model.State) error {
+// Apply carries out plan on behalf of the named target and records what the
+// target now owns. Ownership is tracked per target because skill names are
+// only unique within one.
+func Apply(root, targetName string, plan *planner.Plan, st *model.State) error {
 	if st == nil {
 		return fmt.Errorf("cannot apply a plan with nil state")
 	}
+	if targetName == "" {
+		return fmt.Errorf("cannot apply a plan without a target name")
+	}
 
-	managed := make(map[string]string, len(st.ManagedSymlinks))
-	for _, link := range st.ManagedSymlinks {
+	ts := st.Target(targetName)
+	managed := make(map[string]string, len(ts.ManagedSymlinks))
+	for _, link := range ts.ManagedSymlinks {
 		managed[link.Name] = link.Target
 	}
 
@@ -185,16 +215,17 @@ func Apply(root string, plan *planner.Plan, st *model.State) error {
 		}
 	}
 
-	st.ManagedSymlinks = make([]model.ManagedSymlink, 0, len(managed))
+	ts.ManagedSymlinks = make([]model.ManagedSymlink, 0, len(managed))
 	for name, target := range managed {
-		st.ManagedSymlinks = append(st.ManagedSymlinks, model.ManagedSymlink{
+		ts.ManagedSymlinks = append(ts.ManagedSymlinks, model.ManagedSymlink{
 			Name:   name,
 			Target: target,
 		})
 	}
-	sort.Slice(st.ManagedSymlinks, func(i, j int) bool {
-		return st.ManagedSymlinks[i].Name < st.ManagedSymlinks[j].Name
+	sort.Slice(ts.ManagedSymlinks, func(i, j int) bool {
+		return ts.ManagedSymlinks[i].Name < ts.ManagedSymlinks[j].Name
 	})
+	st.SetTarget(targetName, ts)
 
 	// Persist what actually happened even when an action failed. Links created
 	// before the failure would otherwise be left on disk with no recorded
